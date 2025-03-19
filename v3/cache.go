@@ -29,6 +29,7 @@ type Cache[K comparable, V any] interface {
 	GetExpiration(key K) (time.Time, bool)
 	GetOldest() (K, V, bool)
 	Contains(key K) (ok bool)
+	ContainsOrAdd(key K, value V) (added bool, evicted bool)
 	Peek(key K) (V, bool)
 	Values() []V
 	Keys() []K
@@ -90,12 +91,19 @@ func (c *cacheImpl[K, V]) Set(key K, value V, ttl time.Duration) {
 	c.addWithTTL(key, value, ttl)
 }
 
-// Returns true if an eviction occurred.
-// Returns false if there was no eviction: the item was already in the cache,
-// or the size was not exceeded.
+// Add this modified version of addWithTTL that uses unsafeAddWithTTL
 func (c *cacheImpl[K, V]) addWithTTL(key K, value V, ttl time.Duration) (evicted bool) {
 	c.Lock()
 	defer c.Unlock()
+	return c.unsafeAddWithTTL(key, value, ttl)
+}
+
+// unsafeAddWithTTL is an internal version of addWithTTL that doesn't lock the mutex
+// Returns true if an eviction occurred.
+// Returns false if there was no eviction: the item was already in the cache,
+// or the size was not exceeded.
+// Must be called with the lock already held
+func (c *cacheImpl[K, V]) unsafeAddWithTTL(key K, value V, ttl time.Duration) (evicted bool) {
 	now := time.Now()
 	if ttl == 0 {
 		ttl = c.ttl
@@ -156,6 +164,26 @@ func (c *cacheImpl[K, V]) Contains(key K) (ok bool) {
 	defer c.Unlock()
 	_, ok = c.items[key]
 	return ok
+}
+
+// ContainsOrAdd checks if a key exists in the cache without updating its TTL.
+// If the key doesn't exist, it adds it to the cache with the appropriate TTL.
+// Returns true if the key was added, false if it already existed.
+// Second return value indicates if an eviction occurred during addition.
+func (c *cacheImpl[K, V]) ContainsOrAdd(key K, value V) (added bool, evicted bool) {
+	c.Lock()
+	defer c.Unlock()
+
+	// Check if the key exists
+	if _, ok := c.items[key]; ok {
+		// Key exists, don't update anything
+		return false, false
+	}
+
+	// Key doesn't exist, add it with the appropriate TTL
+	// Use internal unsafeAddWithTTL to avoid double-locking
+	evicted = c.unsafeAddWithTTL(key, value, c.ttl)
+	return true, evicted
 }
 
 // Peek returns the key value (or undefined if not found) without updating the "recently used"-ness of the key.
