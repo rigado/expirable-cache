@@ -1,4 +1,4 @@
-module github.com/go-pkgz/expirable-cache/v3
+module github.com/rigado/expirable-cache/v3
 
 go 1.20
 
