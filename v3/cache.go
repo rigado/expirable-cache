@@ -157,6 +157,40 @@ func (c *cacheImpl[K, V]) Get(key K) (V, bool) {
 	return def, false
 }
 
+func (c *cacheImpl[K, V]) GetOrAdd(key K, value V) (V, bool, bool) {
+	c.Lock()
+	defer c.Unlock()
+
+	now := time.Now()
+
+	// Check if the key exists
+	if ent, ok := c.items[key]; ok {
+		// Expired item check
+		if now.After(ent.Value.(*cacheItem[K, V]).expiresAt) {
+			// Item exists but is expired, update it
+			ent.Value.(*cacheItem[K, V]).value = value
+			ent.Value.(*cacheItem[K, V]).expiresAt = now.Add(c.ttl)
+			if c.isLRU {
+				c.evictList.MoveToFront(ent)
+			}
+			c.stat.Hits++
+			return value, true, false
+		}
+
+		// Item exists and is valid, update its expiration
+		ent.Value.(*cacheItem[K, V]).expiresAt = now.Add(c.ttl)
+		if c.isLRU {
+			c.evictList.MoveToFront(ent)
+		}
+		c.stat.Hits++
+		return ent.Value.(*cacheItem[K, V]).value, false, false
+	}
+
+	// Key doesn't exist, add it
+	evicted := c.unsafeAddWithTTL(key, value, c.ttl)
+	return value, true, evicted
+}
+
 // Contains checks if a key is in the cache, without updating the recent-ness
 // or deleting it for being stale.
 func (c *cacheImpl[K, V]) Contains(key K) (ok bool) {
