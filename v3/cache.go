@@ -28,6 +28,7 @@ type Cache[K comparable, V any] interface {
 	Get(key K) (V, bool)
 	GetExpiration(key K) (time.Time, bool)
 	GetOldest() (K, V, bool)
+	GetOrAdd(key K, value V) (V, bool, bool)
 	Contains(key K) (ok bool)
 	ContainsOrAdd(key K, value V) (added bool, evicted bool)
 	Peek(key K) (V, bool)
